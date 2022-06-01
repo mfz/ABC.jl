@@ -1,0 +1,77 @@
+* ABC.jl
+
+Approximate Bayesian Computation in Julia
+
+Implements ABC SMC algorithm in Appendix A of Toni et al.(2009),
+Approximate Bayesian computation scheme for parameter inference and
+model selection in dynamical systems, J. R. Soc. Interface.
+
+Currently only parameter inference is considered.
+
+** Problem to be solved
+
+Assume we have a generative model that generates data $x$ based on
+parameters $\Theta$, but that the likelihood function
+$f(x|\Theta)$ is not available.
+
+Given observed data $x$ and a prior $\pi(\Theta)$ for the parameters,
+the ABC algorithm produces approximate samples from the posterior $\pi(\Theta|x)$.
+
+** ABC rejection sampler
+
+The ABC rejection sampler proceeds as follows:
+
+- sample parameter vector $\Theta^*$ from prior $\pi(\Theta)$
+- simulate data $x^*$ using $\Theta^*$ using the generative model
+- compare the simulated data $x^*$ to the observed data $x$ using a
+  distance function $d$. If $d(x, x^*) < \epsilon$, accept $\Theta^*$
+  as a sample from the approximate posterior, otherwise reject it.
+
+  Note: the distance function does not need to operate in data space,
+  it can also operate on some summary statistics of the data.
+
+As $\epsilon$ has to be chosen small in order to get a good
+approximation to the posterior, the ABC rejection algorithm has a 
+low acceptance rate and requires a large amount of computation.
+
+
+** ABC sequential Monte Carlo (ABCSMC)
+
+The ABC sequential Monte Carlo sampler improves upon the rejection
+sampler by starting with a large $\epsilon$ when sampling from the
+prior $\pi(\Theta)$ for the first population. Later populations then
+use the posterior from the previous population as an importance
+sampling distribution, and decrease $\epsilon$.
+
+
+- S1: Initialize $\epsilon_1, \ldots, \epsilon_T$, set $t=0$
+- S2.0: set $i=1$
+- S2.1:
+  - if $t=0$, sample $\Theta^{**}$ from $\pi(\Theta)$
+  - if $t>0$, sample $\Theta^*$ from the previous population
+    $\{\Theta^{t-1}\}$ using the importance sampling weights
+    $\{w^{t-1}\}$; perturb particle using perturbation kernel $K_t$ to
+    obtain $\Theta^{**} \sim K_t(\Theta|\Theta^*)$; goto S2.1 if
+    $\pi(\Theta^{**}) = 0$.
+  - simulate $B$ datasets $x_{(b)}|\Theta^{**}$ and calculate
+    $s = \sum_{b=1}^B \mathbf{1}(d(x, x_{(b)}) \le \epsilon_t)$ (use B=1 for deterministic sytems)
+  - if $s=0$ goto S2.1
+
+- S2.2:
+  - set $\Theta_{(i)}^t = \Theta^{**}$
+  - if t = 0, set $w_{(i)}^t = s$
+  - if t > 0, set $w_{(i)}^t = \frac{s \pi(\Theta_{(i)}^t)}{\sum_{j=1}^N w_{(j)}^{t-1} K_t(\Theta_{(i)}^t|\Theta_{(j)}^{t-1})}$
+  - if i < N, set i = i+1 and goto S2.1
+- S3:
+  - normalize the weights
+  - if t < T, set t = t+1 and goto S2.0
+    
+
+Instead of specifying $\epsilon_1, \ldots, \epsilon_T$, we can also
+specify $\epsilon_1$ and $\epsilon_T$ and how $\epsilon_{t+1}$ should
+depend on $\epsilon_t$. An adaptive way is to use the
+$\alpha$-quantile of the (accepted) distances observed in the previous
+population. But how can we take into account the fact that only s out
+of B attempts succeed?
+
+The kernel parameters of kernel $K_t$ can be based on the population $\{\Theta^{t-1}\}$
