@@ -1,5 +1,5 @@
 module ABC
 
-include("abcsml.jl")
+include("abcsmc.jl")
 
 end

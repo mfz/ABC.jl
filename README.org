@@ -2,11 +2,13 @@
 
 Approximate Bayesian Computation in Julia
 
-Implements ABC SMC algorithm in Appendix A of Toni et al.(2009),
-Approximate Bayesian computation scheme for parameter inference and
-model selection in dynamical systems, J. R. Soc. Interface.
+Implements adaptive ABC SMC algorithm according to section 3.3 of
 
-Currently only parameter inference is considered.
+Del Moral et al.(2012), An adaptive sequential Monte Carlo method for approximate
+Bayesian computation, Statistical Computation
+
+https://link.springer.com/content/pdf/10.1007/s11222-011-9271-y.pdf
+
 
 ** Problem to be solved
 
