@@ -1,7 +1,7 @@
 
 using Distributions
 using Roots
-using Statistics
+using StatsBase
 import Random
 
 struct Particle{T}
@@ -22,7 +22,7 @@ end
 
 function perturb(p::Particle{T}, scales) where {T}
     n = fieldcount(T)
-    res = Array{Any}(undef, 4)
+    res = Array{Any}(undef, n)
     for i = 1:n
         res[i] = p.x[i] + rand() * scales[i]
     end
@@ -31,6 +31,7 @@ end
 
 
 # prior is a tuple of N univariate distributions
+# for prior we treat all dimensions as independent
 struct Prior{N} 
     dists::NTuple{N, UnivariateDistribution}
     Prior(args::UnivariateDistribution...) = new{length(args)}(args)
@@ -59,19 +60,47 @@ function Distributions.rand(p::Prior{N}) where {N}
 end
 
 
+abstract type Kernel end
+
+mutable struct GaussianKernel
+    σ::Vector{Float64}  # let's assume diagonal 
+    GaussianKernel(σ) = new(σ)
+end
+
+Distributions.pdf(k::GaussianKernel, x) = sum(pdf.(Normal.(0, k.σ), x))
+
+function perturb(p::Particle{T}, k::GaussianKernel) where {T} 
+    n = fieldcount(T)
+    res = Array{Any}(undef, n)
+    for i = 1:n
+        res[i] = p.x[i] + rand() * k.σ[i]
+    end
+    Particle(T(res))
+end
+
+function update!(k::GaussianKernel, particles::Vector{Particle{T}}, ws) where {T}
+    # want weighted standard deviation for each dimension
+    # provided by StatsBase.std
+    n = fieldcount(T)
+    res = Array{Float64}(undef, n)
+    for i = 1:n
+        res[i] = std((p.x[i] for p in ps), pweights(ws))
+    end
+    GaussianKernel(res)
+end
+
 
 abstract type ABCAlgorithm end
 
 struct AdaptiveABC <: ABCAlgorithm
     N::Int64       # number of particles to use
-    η::Float64     # resample once ESS < N * η
     abs_tol::Float64
     rel_tol::Float64
     α::Float64          # alpha (coverage of ϵ to include in new population)
     M::Int64            # number os simulations to perform per particle
 
-    AdaptiveABC(;N = 100, η = 0.5, abs_tol = 0.0, rel_tol = 0.001, α = 0.95, M = 1) =
-        new(N, η, abs_tol, rel_tol, α, M)
+    AdaptiveABC(;N = 100, abs_tol = 0.0, rel_tol = 0.001, α = 0.95, M = 1) =
+        new(N, abs_tol, rel_tol, α, M)
 end
 
 
@@ -90,7 +119,7 @@ function compute_ess(weights)
 end
 
 
-function compute_weights_epsilon(weights_prev, eps_prev, distances, alpha)
+function compute_epsilon(weights_prev, eps_prev, distances, alpha)
 
     ess_prev = compute_ess(weights_prev)
 
@@ -106,17 +135,19 @@ function compute_weights_epsilon(weights_prev, eps_prev, distances, alpha)
         alpha * ess_prev - ess_new
     end
 
-    weights, find_zero(f, (minimum(distances) + eps(Float64), eps_prev))
+    find_zero(f, (minimum(distances) + eps(Float64), eps_prev))
 
 end
 
 function sample(model::Function, prior::Prior{N}, alg::AdaptiveABC) where {N}
 
     particles = [rand(prior) for i in 1:alg.N]
+    particles_prev = similar(particles)
     distances = Array{Float64}(undef, (alg.N, alg.M))
     #successes = Array{Int64}(undef, alg.N)  # successes[i] = how many sims have model(particle[i]) <= ϵ
     weights = ones(Float64, alg.N) / alg.N
-   
+    weights_prev = ones(Float64, alg.N) / alg.N
+    
     n = 0
     ϵ = Inf
 
@@ -129,30 +160,46 @@ function sample(model::Function, prior::Prior{N}, alg::AdaptiveABC) where {N}
         end
     end
 
-    ess = compute_ess(weights)
+    ess = alg.N
+    
     @show n, ϵ, ess
     
     while true
         n = n + 1
         ϵ_prev = ϵ
-        weights, ϵ = compute_weights_epsilon(weights, ϵ_prev, distances, alg.α)
-        ess = compute_ess(weights)
-        @show n, ϵ, ess
+        particles_prev .= particles
+        weights_prev .= weights
 
-        if ess < alg.η * N
-            # resample
-            idx = wsample(1:alg.N, weights)
-            particles .= particles[idx]
-            fill!(weights, 1/alg.N)
-        end
+        # compute new ϵ
+        ϵ = compute_epsilon(weights, ϵ_prev, distances, alg.α)
+ 
+        # if ess < alg.η * N
+        #     # resample
+        #     idx = wsample(1:alg.N, weights)
+        #     particles .= particles[idx]
+        #     fill!(weights, 1/alg.N)
+        # end
 
-        scales = 2*std(particles)
+        scales = 2*std(particles_prev)
         
         for i = 1:alg.N
-            particles[i] = perturb(particles[i], scales)
-            for j = 1:alg.M
-                distances[i, j] = model(particles[i].x) 
+            s = 0  # number of successes
+            while s == 0
+                j = wsample(1:alg.N, weights)
+                particles[i] = perturb(particles_prev[j], scales)
+                pdf(prior, particles[i].x) == 0 && continue
+                for j = 1:alg.M
+                    distances[i, j] = model(particles[i].x)
+                    if distances[i,j] <= ϵ
+                        s += 1
+                    end
+                end
             end
+            denominator = 0.0
+            for j = 1:alg.N
+                denominator += weights_prev[j] * kernel(particles[i], particles_prev[j])
+            end
+            weights[i] = pdf(prior, particles[i]) * s / denominator
         end
 
         if 2 * abs(ϵ_prev - ϵ) < alg.rel_tol * (abs(ϵ_prev) + abs(ϵ)) ||

@@ -46,6 +46,76 @@ use the posterior from the previous population as an importance
 sampling distribution, and decrease $\epsilon$.
 
 
+First, we sample a population of N particles from the prior
+distribution and assign them weights 1/N.  Our effective sample size
+is N. The convolution of these N particles with the kernel represent
+our prior distribution.
+
+The following populations take the observed data into account. As we
+do not have an easily computed likelihood function available, the
+posterior is approximated iteratively. Each population uses the
+posterior estimate from the previous population as the importance
+sampling distribution. I.e. we sample a new particle from the previous
+population using weights and perturb it using the kernel function (the
+parameters of the kernel can be adapted at the start of each
+population, using the previous population). As we only want to accept
+particles that are compatible with the observed data, we simulate B
+data sets using the current particle, and count how many (b) of these
+B data sets have distance less than epsilon from the observed data
+set.  Only particles that have $\pi(\Theta_i) > 0$ and at least one
+compatible data set (b >= 1) are accepted.  Once N particles have been
+accepted, the particle weights are adjusted to update the importance
+sampling distribution. The unnormalized weights are computed according
+to
+
+\[ w_i^{(n+1)} =
+\frac{\pi(\Theta_i^{(n+1)}) b}{\sum_{j=1}^N w_j^{(n)}
+K(\Theta_i^{(n+1)}, \Theta_j^{(n)})} \]
+
+Both the parameters of the kernel function and epsilon can be adapted
+at the beginning of each population.
+
+The scales of the kernel function can be estimated from the previous
+particle population. Epsilon can be estimated by solving
+
+\[ ESS(\hat{w}^{(n+1)}) = \alpha ESS(w^{(n)}) \]
+
+where
+
+  \[ \hat{w}_i^{(n+1)} \propto w_i^{(n)} \frac{b_i(\epsilon_{n+1})}{b_i(\epsilon_n)} \] 
+ and
+ \[ESS(w) = \frac{1}{\sum_i w_i^2} \] 
+
+
+
+
+and simulate datasets
+
+
+
+Step 1 (use eps = Inf)
+- for i = 1:N
+  - sample particle $\Theta_i$ from $\pi(\Theta)$
+  - simulate B datasets using model and compute
+    $distance[i, b] = d(S(y), S(x_b|\Theta_i))$
+  - w[i] = 1/N
+  - ESS = N
+  
+Step 2
+- while true
+  - ESS_prev = ESS
+  - eps_prev = eps
+  - w_prev = w
+  - compute eps such that new ESS = alpha * ESS_prev using bisection
+    (same approach as Del Moral)
+  - for i = 1:N
+    - sample Theta[i] from previous population
+    - perturb
+    - simulate B datasets    
+    - w[i] = prior(Theta[i])*success(distance[i,:], eps) / sum
+    - until w[i] > 0
+  - normalize weights
+
 - S1: Initialize $\epsilon_1, \ldots, \epsilon_T$, set $t=0$
 - S2.0: set $i=1$
 - S2.1:
